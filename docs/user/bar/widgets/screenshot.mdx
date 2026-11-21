@@ -5,7 +5,7 @@ sidebar:
   order: 20
 ---
 
-Captures the screen through the compositor's `wlr-screencopy` protocol (Niri, Hyprland, Sway, and other compositors that expose it). The widget is omitted from the bar when screencopy is unavailable.
+Captures the screen through the compositor's `wlr-screencopy` protocol (Niri, Hyprland, Sway, and other compositors that expose it). On compositors without `wlr-screencopy` that expose the ext image capture protocols (such as COSMIC), it captures through `ext-image-copy-capture` instead. The widget is omitted from the bar when neither protocol is available.
 
 | Setting                 | Type   | Default        | Description                                                                         |
 | ----------------------- | ------ | -------------- | ----------------------------------------------------------------------------------- |

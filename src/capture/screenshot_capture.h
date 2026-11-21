@@ -1,5 +1,6 @@
 #pragma once
 
+#include "capture/image_copy_capture.h"
 #include "capture/pointer_cursor_capture.h"
 #include "capture/screenshot_image.h"
 #include "core/timer_manager.h"
@@ -30,6 +31,7 @@ private:
 
   WaylandConnection& m_wayland;
   ScreencopyCapture m_backgroundCapture;
+  ImageCopyCapture m_iccCapture;
   PointerCursorCapture m_cursorCapture;
   Timer m_timeout;
   wl_output* m_output = nullptr;
@@ -38,5 +40,6 @@ private:
   capture::CursorToggleStatus m_cursorStatus = capture::CursorToggleStatus::NotCaptured;
   bool m_busy = false;
   bool m_showCursor = false;
+  bool m_useIcc = false;
   CompletionCallback m_onComplete;
 };

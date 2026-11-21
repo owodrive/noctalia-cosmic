@@ -117,7 +117,7 @@ The CLI forwards everything after the command as one string (`noctalia msg wallp
 
 ## Screenshots
 
-Region and fullscreen capture require compositor support for `wlr-screencopy-unstable-v1`. Window capture uses `ext-image-copy-capture-v1` and `ext-foreign-toplevel-image-capture-source-manager-v1`. All screenshot commands use the global `[shell.screenshot]` output policy (directory, filename pattern, file format, freeze, save to file, clipboard, pipe command) unless [per-call options](#per-call-options) override it; window capture ignores `freeze`. See [Shell settings](/noctalia/configuration/shell/#shell-settings).
+Region and fullscreen capture require compositor support for `wlr-screencopy-unstable-v1` or `ext-image-copy-capture-v1`. Window capture uses `ext-image-copy-capture-v1` and `ext-foreign-toplevel-image-capture-source-manager-v1`. All screenshot commands use the global `[shell.screenshot]` output policy (directory, filename pattern, file format, freeze, save to file, clipboard, pipe command) unless [per-call options](#per-call-options) override it; window capture ignores `freeze`. See [Shell settings](/noctalia/configuration/shell/#shell-settings).
 
 | Action                       | Command                                               | Description                                                                                                                                                                      |
 | ---------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
