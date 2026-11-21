@@ -880,6 +880,7 @@ _noctalia_sources = files(
   'src/system/location_service.cpp',
   'src/capture/screencopy_capture.cpp',
   'src/capture/pointer_cursor_capture.cpp',
+  'src/capture/image_copy_capture.cpp',
   'src/capture/toplevel_thumbnail_capture.cpp',
   'src/capture/screencopy_util.cpp',
   'src/capture/screenshot_capture.cpp',

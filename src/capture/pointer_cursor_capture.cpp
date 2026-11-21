@@ -1,5 +1,6 @@
 #include "capture/pointer_cursor_capture.h"
 
+#include "capture/shm_format_util.h"
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
 #include "shell/wayland/capture_globals.h"
@@ -16,21 +17,6 @@
 #include <utility>
 
 namespace {
-  int formatPreference(std::uint32_t format) {
-    switch (format) {
-    case WL_SHM_FORMAT_ARGB8888:
-      return 4;
-    case WL_SHM_FORMAT_ABGR8888:
-      return 3;
-    case WL_SHM_FORMAT_XRGB8888:
-      return 2;
-    case WL_SHM_FORMAT_XBGR8888:
-      return 1;
-    default:
-      return 0;
-    }
-  }
-
   std::uint8_t straightChannel(std::uint32_t value, std::uint32_t alpha) {
     return alpha == 0 ? 0 : static_cast<std::uint8_t>(std::min(255U, (value * 255U + alpha / 2U) / alpha));
   }

@@ -1,6 +1,7 @@
 #include "capture/toplevel_thumbnail_capture.h"
 
 #include "capture/screencopy_util.h"
+#include "capture/shm_format_util.h"
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
 #include "render/core/image_resize.h"
@@ -16,35 +17,6 @@
 #include <utility>
 
 namespace {
-  int formatPreference(std::uint32_t format) {
-    switch (format) {
-    case WL_SHM_FORMAT_ARGB8888:
-      return 4;
-    case WL_SHM_FORMAT_ABGR8888:
-      return 3;
-    case WL_SHM_FORMAT_XRGB8888:
-      return 2;
-    case WL_SHM_FORMAT_XBGR8888:
-      return 1;
-    default:
-      return 0;
-    }
-  }
-
-  // wl_shm names formats by little-endian word order, so ARGB8888 is B, G, R, A in memory.
-  ResizeSourceLayout resizeLayoutFor(std::uint32_t format) noexcept {
-    switch (format) {
-    case WL_SHM_FORMAT_ARGB8888:
-      return ResizeSourceLayout::BgraPremultiplied;
-    case WL_SHM_FORMAT_XRGB8888:
-      return ResizeSourceLayout::Bgrx;
-    case WL_SHM_FORMAT_ABGR8888:
-      return ResizeSourceLayout::RgbaPremultiplied;
-    default:
-      return ResizeSourceLayout::Rgbx;
-    }
-  }
-
   bool transformSwapsAxes(std::int32_t transform) noexcept {
     return transform == WL_OUTPUT_TRANSFORM_90
         || transform == WL_OUTPUT_TRANSFORM_270

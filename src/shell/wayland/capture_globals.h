@@ -36,6 +36,11 @@ public:
     return m_foreignToplevelSourceManager;
   }
 
+  // Output capture needs the manager and the output source manager together.
+  bool outputCaptureAvailable() const noexcept {
+    return m_copyCaptureManager != nullptr && m_outputSourceManager != nullptr;
+  }
+
 private:
   ext_image_copy_capture_manager_v1* m_copyCaptureManager = nullptr;
   ext_output_image_capture_source_manager_v1* m_outputSourceManager = nullptr;
