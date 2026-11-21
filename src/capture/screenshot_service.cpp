@@ -51,6 +51,7 @@
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <sys/wait.h>
+#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -63,6 +64,7 @@ namespace {
   constexpr const char* kLastRegionKey = "last_region";
   constexpr const char* kAnnotateStateOwner = "annotate";
   constexpr const char* kBackdropStateKey = "backdrop";
+  constexpr std::size_t kMaxQueuedDeliveries = 3;
 
   std::optional<double> parseDouble(std::string_view text) {
     double value = 0.0;
@@ -1655,8 +1657,8 @@ void ScreenshotService::ensureAnnotationOverlay() {
     applyEditorBackdrop(options);
     const std::optional<std::filesystem::path> destPath =
         options.saveToFile ? std::optional(makeScreenshotPath(options, "annotated")) : std::nullopt;
-    const bool delivered = finishDelivery(std::move(image), options, destPath);
-    if (delivered
+    const bool accepted = finishDelivery(std::move(image), options, destPath);
+    if (accepted
         && ((action == capture::AnnotationExport::Copy && options.closeOnCopy)
             || (action == capture::AnnotationExport::Save && options.closeOnSave))) {
       DeferredCall::callLater([this] { m_annotationOverlay->cancel(); });
@@ -1720,7 +1722,7 @@ void ScreenshotService::beginImageAnnotation(
   ensureAnnotationOverlay();
   if (m_annotationOverlay == nullptr) {
     kLog.warn("annotate requested but no render context is available; delivering unannotated");
-    finishDelivery(std::move(image.image), options, std::move(destPath));
+    finishDelivery(std::move(image.image), options, destPath);
     return;
   }
   m_pendingDelivery = PendingDelivery{.options = options, .destPath = std::move(destPath)};
@@ -2144,7 +2146,7 @@ void ScreenshotService::deliverCaptureResult(
     beginImageAnnotation(std::move(image), options, std::move(destPath));
     return;
   }
-  finishDelivery(std::move(image.image), options, std::move(destPath));
+  finishDelivery(std::move(image.image), options, destPath);
 }
 
 // The backdrop comes only from the Image-mode editor, which previews and edits it.
@@ -2216,9 +2218,10 @@ capture::ScreenshotBackdropSettings ScreenshotService::loadScreenshotBackdrop() 
   return backdrop;
 }
 
-bool ScreenshotService::finishDelivery(
-    ScreencopyImage image, const OutputOptions& options, std::optional<std::filesystem::path> destPath
+ScreenshotService::DeliveryEncoding ScreenshotService::encodeScreenshotDelivery(
+    ScreencopyImage image, const OutputOptions& options, const std::optional<std::filesystem::path>& destPath
 ) {
+  DeliveryEncoding outcome;
   if (options.backdrop.has_value()) {
     image = capture::applyScreenshotBackdrop(image, *options.backdrop);
   }
@@ -2228,19 +2231,16 @@ bool ScreenshotService::finishDelivery(
   // Clipboard and pipe consumers always receive PNG; only the saved file uses the configured format.
   const bool needsPng = options.copyToClipboard || pipe || (saveFile && options.format == ScreenshotFormat::Png);
 
-  std::string encodeError;
-  std::vector<std::uint8_t> png;
   if (needsPng) {
-    png = encodePng(image.rgba.data(), image.width, image.height, &encodeError);
-    if (png.empty()) {
+    std::string encodeError;
+    outcome.png = encodePng(image.rgba.data(), image.width, image.height, &encodeError);
+    if (outcome.png.empty()) {
       kLog.warn("screenshot encode failed: {}", encodeError);
-      notifyError(encodeError.empty() ? "Failed to encode screenshot" : encodeError);
-      return false;
+      outcome.failureMessage = encodeError.empty() ? "Failed to encode screenshot" : encodeError;
+      outcome.fatal = true;
+      return outcome;
     }
   }
-
-  bool delivered = false;
-  std::string failureMessage;
 
   if (destPath.has_value()) {
     std::error_code ec;
@@ -2251,52 +2251,128 @@ bool ScreenshotService::finishDelivery(
   }
 
   if (saveFile) {
+    std::string encodeError;
     std::vector<std::uint8_t> encoded;
     if (options.format != ScreenshotFormat::Png) {
       encoded = encodeScreenshotFile(image, options.format, options.quality, &encodeError);
     }
-    const std::vector<std::uint8_t>& fileBytes = options.format == ScreenshotFormat::Png ? png : encoded;
+    const std::vector<std::uint8_t>& fileBytes = options.format == ScreenshotFormat::Png ? outcome.png : encoded;
     if (fileBytes.empty()) {
       kLog.warn("screenshot encode failed: {}", encodeError);
-      failureMessage = encodeError.empty() ? "Failed to encode screenshot" : encodeError;
+      outcome.failureMessage = encodeError.empty() ? "Failed to encode screenshot" : encodeError;
     } else {
       std::ofstream out(*destPath, std::ios::binary | std::ios::trunc);
       out.write(reinterpret_cast<const char*>(fileBytes.data()), static_cast<std::streamsize>(fileBytes.size()));
       if (!out) {
         kLog.warn("screenshot write failed: {}", destPath->string());
-        failureMessage = "Failed to save screenshot";
+        outcome.failureMessage = "Failed to save screenshot";
       } else {
-        notifySaved(*destPath);
-        delivered = true;
+        outcome.fileWritten = true;
       }
     }
+  }
+
+  return outcome;
+}
+
+void ScreenshotService::deliverAfterEncoding(
+    DeliveryEncoding encoding, const OutputOptions& options, const std::optional<std::filesystem::path>& destPath
+) {
+  if (encoding.fatal) {
+    notifyError(encoding.failureMessage.empty() ? "Failed to encode screenshot" : encoding.failureMessage);
+    return;
+  }
+
+  bool delivered = false;
+  const bool pipe = options.pipeToCommand && !options.pipeCommand.empty();
+
+  if (encoding.fileWritten) {
+    notifySaved(*destPath);
+    delivered = true;
   }
 
   if (options.copyToClipboard) {
     if (m_clipboard == nullptr || !m_clipboard->isAvailable()) {
       kLog.warn("screenshot clipboard copy skipped: clipboard unavailable");
-      if (failureMessage.empty()) {
-        failureMessage = "Clipboard is not available";
+      if (encoding.failureMessage.empty()) {
+        encoding.failureMessage = "Clipboard is not available";
       }
-    } else if (m_clipboard->copyImagePng(png)) {
+    } else if (m_clipboard->copyImagePng(pipe ? std::vector<std::uint8_t>(encoding.png) : std::move(encoding.png))) {
       delivered = true;
     } else {
       kLog.warn("screenshot clipboard copy failed");
-      if (failureMessage.empty()) {
-        failureMessage = "Failed to copy screenshot to clipboard";
+      if (encoding.failureMessage.empty()) {
+        encoding.failureMessage = "Failed to copy screenshot to clipboard";
       }
     }
   }
 
   if (pipe) {
-    pipePngToCommandAsync(options.pipeCommand, std::move(png), destPath);
+    pipePngToCommandAsync(options.pipeCommand, std::move(encoding.png), destPath);
     delivered = true;
   }
 
   if (!delivered) {
-    notifyError(failureMessage.empty() ? "No screenshot output enabled" : failureMessage);
+    notifyError(encoding.failureMessage.empty() ? "No screenshot output enabled" : encoding.failureMessage);
   }
-  return delivered;
+}
+
+bool ScreenshotService::finishDelivery(
+    ScreencopyImage image, const OutputOptions& options, const std::optional<std::filesystem::path>& destPath
+) {
+  bool overCap = false;
+  {
+    std::scoped_lock lock(m_deliveryState->mutex);
+    // A capture burst outruns a 4K encode, and each queued job pins one full-resolution frame.
+    // Three queued plus one in flight is roughly 130 MB of 4K RGBA frames.
+    if (m_deliveryState->queue.size() >= kMaxQueuedDeliveries) {
+      overCap = true;
+    } else {
+      m_deliveryState->queue.push_back(DeliveryJob{std::move(image), options, destPath});
+      if (!m_deliveryState->workerRunning) {
+        m_deliveryState->workerRunning = true;
+        try {
+          std::thread([state = m_deliveryState, this] { runDeliveryWorker(state); }).detach();
+        } catch (const std::system_error&) {
+          // Thread creation failed and the queued images were consumed, so surface an error.
+          m_deliveryState->workerRunning = false;
+          m_deliveryState->queue.clear();
+          kLog.warn("screenshot delivery: failed to start delivery worker");
+          DeferredCall::callLater([this] { notifyError("Failed to save screenshot"); });
+          return false;
+        }
+      }
+    }
+  }
+  if (overCap) {
+    DeferredCall::callLater([this] { notifyError("A screenshot is still being saved"); });
+    return false;
+  }
+  return true;
+}
+
+void ScreenshotService::runDeliveryWorker(const std::shared_ptr<DeliveryState>& state) {
+  for (;;) {
+    DeliveryJob job;
+    {
+      std::scoped_lock lock(state->mutex);
+      if (state->queue.empty()) {
+        state->workerRunning = false;
+        return;
+      }
+      job = std::move(state->queue.front());
+      state->queue.pop_front();
+    }
+    try {
+      DeliveryEncoding encoding = encodeScreenshotDelivery(std::move(job.image), job.options, job.destPath);
+      DeferredCall::callLater([this, encoding = std::move(encoding), options = std::move(job.options),
+                               destPath = std::move(job.destPath)] mutable {
+        deliverAfterEncoding(std::move(encoding), options, destPath);
+      });
+    } catch (const std::bad_alloc&) {
+      DeferredCall::callLater([this] { notifyError("Failed to save screenshot"); });
+    }
+  }
 }
 
 void ScreenshotService::onCaptureComplete(

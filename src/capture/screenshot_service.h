@@ -8,9 +8,11 @@
 #include "config/config_types.h"
 
 #include <cstdint>
+#include <deque>
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -187,8 +189,38 @@ private:
   void deliverCaptureResult(
       capture::ScreenshotImage image, const OutputOptions& options, std::optional<std::filesystem::path> destPath
   );
-  bool
-  finishDelivery(ScreencopyImage image, const OutputOptions& options, std::optional<std::filesystem::path> destPath);
+  struct DeliveryEncoding {
+    std::vector<std::uint8_t> png;
+    bool fileWritten = false;
+    std::string failureMessage;
+    bool fatal = false;
+  };
+  struct DeliveryJob {
+    ScreencopyImage image;
+    OutputOptions options;
+    std::optional<std::filesystem::path> destPath;
+  };
+  // Held by shared_ptr so a quit during encode leaves the detached worker holding its own
+  // state. Its DeferredCall continuations are dropped when the loop ends.
+  struct DeliveryState {
+    std::mutex mutex;
+    std::deque<DeliveryJob> queue;
+    bool workerRunning = false;
+  };
+  // Touches no service state, so the delivery worker can call it.
+  static DeliveryEncoding encodeScreenshotDelivery(
+      ScreencopyImage image, const OutputOptions& options, const std::optional<std::filesystem::path>& destPath
+  );
+  void deliverAfterEncoding(
+      DeliveryEncoding encoding, const OutputOptions& options, const std::optional<std::filesystem::path>& destPath
+  );
+  // Queues on the single FIFO worker: encode/write off-thread, clipboard/pipe/notify back
+  // on main via DeferredCall. Returns whether the job was accepted. The queued delivery
+  // reports its own failures.
+  bool finishDelivery(
+      ScreencopyImage image, const OutputOptions& options, const std::optional<std::filesystem::path>& destPath
+  );
+  void runDeliveryWorker(const std::shared_ptr<DeliveryState>& state);
   void applyEditorBackdrop(OutputOptions& options) const;
   void persistScreenshotBackdrop(const capture::ScreenshotBackdropSettings& backdrop);
   capture::ScreenshotBackdropSettings loadScreenshotBackdrop() const;
@@ -233,6 +265,7 @@ private:
   std::string m_annotationCaptureError;
   std::vector<FreezeRequest> m_pendingFreezeCaptures;
   std::optional<PendingDelivery> m_pendingDelivery;
+  std::shared_ptr<DeliveryState> m_deliveryState = std::make_shared<DeliveryState>();
   FreezeTarget m_freezeTarget = FreezeTarget::Region;
   bool m_freezeCaptureActive = false;
   SoundPlayer* m_soundPlayer = nullptr;
