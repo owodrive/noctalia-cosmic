@@ -1,6 +1,7 @@
 #include "shell/lockscreen/lock_screen.h"
 
 #include "auth/fingerprint_authenticator.h"
+#include "capture/image_copy_capture.h"
 #include "capture/screencopy_util.h"
 #include "compositors/compositor_platform.h"
 #include "config/config_service.h"
@@ -981,10 +982,16 @@ void LockScreen::syncInstances() {
   applyOutputRestriction();
 }
 
+bool LockScreen::desktopCaptureAvailable() const {
+  if (m_wayland == nullptr) {
+    return false;
+  }
+  return m_wayland->extension<ScreencopyGlobals>().manager() != nullptr
+      || m_wayland->extension<ImageCaptureGlobals>().outputCaptureAvailable();
+}
+
 bool LockScreen::shouldCaptureDesktop() const {
-  if (m_configService == nullptr
-      || m_wayland == nullptr
-      || m_wayland->extension<ScreencopyGlobals>().manager() == nullptr) {
+  if (m_configService == nullptr || !desktopCaptureAvailable()) {
     return false;
   }
   const auto& lockscreen = m_configService->config().lockscreen;
@@ -1055,6 +1062,7 @@ bool LockScreen::captureDesktopSnapshots() {
   const auto firstCaptureDeadline = std::chrono::steady_clock::now() + screencopy::kBlockingCaptureTimeout;
   WaylandConnection captureWayland(WaylandConnection::Purpose::Sibling);
   captureWayland.extension<ScreencopyGlobals>();
+  captureWayland.extension<ImageCaptureGlobals>();
   std::string setupError;
   if (!captureWayland.connectUntil(firstCaptureDeadline, m_wayland, setupError)) {
     kLog.warn("lockscreen desktop capture setup failed: {}", setupError);
@@ -1062,8 +1070,10 @@ bool LockScreen::captureDesktopSnapshots() {
   }
 
   ScreencopyCapture capture(captureWayland);
-  if (!capture.available()) {
-    kLog.warn("lockscreen desktop capture requested but isolated screencopy is unavailable");
+  ImageCopyCapture iccCapture(captureWayland);
+  const bool useIcc = !capture.available() && iccCapture.available();
+  if (!capture.available() && !iccCapture.available()) {
+    kLog.warn("lockscreen desktop capture requested but no isolated capture backend is available");
     return true;
   }
 
@@ -1088,9 +1098,13 @@ bool LockScreen::captureDesktopSnapshots() {
     const auto deadline =
         firstCapture ? std::optional<std::chrono::steady_clock::time_point>(firstCaptureDeadline) : std::nullopt;
     firstCapture = false;
-    const screencopy::CaptureOutputStatus captureStatus = screencopy::captureOutputBlocking(
-        capture, captureWayland, captureIt->output, image, error, false, m_wayland, deadline
-    );
+    const auto captureBlocking = [&](auto& backend) {
+      return screencopy::captureOutputBlocking(
+          backend, captureWayland, captureIt->output, image, error, false, m_wayland, deadline
+      );
+    };
+    const screencopy::CaptureOutputStatus captureStatus =
+        useIcc ? captureBlocking(iccCapture) : captureBlocking(capture);
     if (captureStatus != screencopy::CaptureOutputStatus::Success) {
       if (generation != m_desktopCaptureGeneration) {
         return false;
@@ -1144,9 +1158,7 @@ void LockScreen::chooseTransition() {
   if (m_transitionSuppressed) {
     return;
   }
-  if (m_configService == nullptr
-      || m_wayland == nullptr
-      || m_wayland->extension<ScreencopyGlobals>().manager() == nullptr) {
+  if (m_configService == nullptr || !desktopCaptureAvailable()) {
     return;
   }
 

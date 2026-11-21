@@ -750,7 +750,9 @@ settings::RegistryEnvironment SettingsWindow::buildRegistryEnvironment() const {
     env.shellAvatarPath = shell::resolvedAvatarPath(m_accounts, m_config->config());
   }
   env.niriBackdropSupported = (m_wayland != nullptr && compositors::isNiri());
-  env.screencopySupported = m_wayland != nullptr && m_wayland->extension<ScreencopyGlobals>().manager() != nullptr;
+  env.desktopCaptureSupported = m_wayland != nullptr
+      && (m_wayland->extension<ScreencopyGlobals>().manager() != nullptr
+          || m_wayland->extension<ImageCaptureGlobals>().outputCaptureAvailable());
   env.backgroundEffectBlurSupported = m_wayland != nullptr && m_wayland->extension<BackgroundEffectGlobals>().hasBlur();
   env.niriOverviewTypeToLaunchSupported = (m_wayland != nullptr && compositors::isNiri());
   env.umbrielOverviewTypeToLaunchSupported = (m_wayland != nullptr && compositors::isUmbriel());

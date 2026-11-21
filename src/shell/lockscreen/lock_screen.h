@@ -119,6 +119,7 @@ private:
   [[nodiscard]] bool captureDesktopSnapshots();
   void invalidateDesktopCaptures();
   bool shouldCaptureDesktop() const;
+  bool desktopCaptureAvailable() const;
   bool allSurfacesReady() const;
   bool tryFlushPendingAfterLocked();
   void dispatchPendingAfterLocked(bool timedOut = false);

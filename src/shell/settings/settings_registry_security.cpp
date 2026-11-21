@@ -140,7 +140,7 @@ namespace settings::registry {
       e.visibleWhen = lockscreenOn;
       entries.push_back(std::move(e));
     }
-    if (env.screencopySupported) {
+    if (env.desktopCaptureSupported) {
       auto e = makeEntry(
           SettingsSection::LockScreen, "background", tr("settings.schema.lockscreen.blurred-desktop.label"),
           tr("settings.schema.lockscreen.blurred-desktop.description"), {"lockscreen", "blurred_desktop"},
@@ -200,7 +200,7 @@ namespace settings::registry {
       e.visibleWhen = lockscreenOn;
       entries.push_back(std::move(e));
     }
-    if (env.screencopySupported) {
+    if (env.desktopCaptureSupported) {
       MultiSelectSetting transitions;
       transitions.options.reserve(std::size(kLockscreenTransitions));
       for (const auto& opt : kLockscreenTransitions) {

@@ -320,7 +320,7 @@ namespace settings {
     bool umbrielOverviewTypeToLaunchSupported = false;
     bool niriOverviewCloseOnLaunchSupported = false;
     bool umbrielOverviewCloseOnLaunchSupported = false;
-    bool screencopySupported = false;           // lockscreen blurred desktop + screenshot features
+    bool desktopCaptureSupported = false;       // lockscreen desktop capture and transitions
     bool backgroundEffectBlurSupported = false; // hide compositor blur toggles without ext-background-effect-v1
     bool ddcutilAvailable = false;              // disable ddcutil toggle when ddcutil is not on PATH
     bool systemdUserManaged = false;            // disable systemd app launching when the shell is not a user unit
